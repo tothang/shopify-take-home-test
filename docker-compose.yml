@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: pricing-console-backend
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/service
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: pricing-console-frontend
+    command: sh -c "npm install --no-audit --no-fund && npm run start -- --host 0.0.0.0"
+    environment:
+      BACKEND_ORIGIN: http://backend:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/service
+      - frontend-dependencies:/service/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  frontend-dependencies:

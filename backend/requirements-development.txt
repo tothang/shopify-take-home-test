@@ -1,0 +1,12 @@
+# Every version is pinned, including indirect dependencies, so every clone
+# installs exactly what the provided tests and lint rules were checked against.
+# If you add a dependency, pin it here with == and say why in your notes.
+
+colorama==0.4.6 ; sys_platform == 'win32'
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+pygments==2.21.0
+pytest==8.4.2
+pytest-asyncio==0.26.0
+ruff==0.16.8
