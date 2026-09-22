@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from application.schemas import VariantUpdatedEvent
+
+logger = logging.getLogger(__name__)
 
 
 class EventBroker:
@@ -26,11 +29,30 @@ class EventBroker:
             self._subscribers.discard(queue)
 
     async def publish(self, event: VariantUpdatedEvent) -> None:
+        """Hand the event to every subscriber. Never raises for a slow one.
+
+        The queues are bounded, so put_nowait can raise QueueFull. That is
+        handled here, per subscriber, so one browser that stopped reading
+        cannot fail the webhook or the update that is publishing.
+
+        The subscriber is dropped, not just this one event. A browser that
+        quietly missed an event would keep showing the old value and never
+        know. Dropped, its stream ends, the browser reconnects, and it reloads
+        the catalog, which brings back everything it missed.
+        """
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
                 self._subscribers.discard(queue)
+                logger.warning(
+                    "Dropped an event stream subscriber that fell behind.",
+                    extra={"queue_size": self._queue_size, "variant_id": event.variant.id},
+                )
+
+    def is_subscribed(self, queue: asyncio.Queue[VariantUpdatedEvent]) -> bool:
+        """False once publish has dropped this queue for falling behind."""
+        return queue in self._subscribers
 
     @property
     def subscriber_count(self) -> int:

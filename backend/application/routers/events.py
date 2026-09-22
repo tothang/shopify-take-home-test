@@ -25,6 +25,12 @@ async def stream_product_events(request: Request) -> StreamingResponse:
         async with event_broker.subscribe() as queue:
             yield "event: ready\ndata: {}\n\n"
             while not await request.is_disconnected():
+                # Dropped by the broker for falling behind. Without this the
+                # stream would keep sending heartbeats and never another event,
+                # and the browser would show live updates as working. Ending it
+                # makes the browser reconnect and reload what it missed.
+                if not event_broker.is_subscribed(queue):
+                    return
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL_SECONDS)
                 except TimeoutError:

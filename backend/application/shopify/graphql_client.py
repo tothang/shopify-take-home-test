@@ -1,3 +1,5 @@
+import json
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -48,7 +50,12 @@ class ShopifyGraphQLClient:
         if response.status_code >= 400:
             raise ShopifyError(f"Shopify returned status {response.status_code}: {response.text}")
 
-        payload = response.json()
+        # A 200 is not always JSON: an edge proxy or a maintenance page can
+        # answer instead of Shopify. parse_float keeps any number out of a float.
+        try:
+            payload = json.loads(response.content, parse_float=Decimal)
+        except ValueError as error:
+            raise ShopifyError(f"Shopify returned a body that is not JSON: {response.text[:200]}") from error
         if payload.get("errors"):
             raise ShopifyError(f"Shopify returned GraphQL errors: {payload['errors']}")
 
