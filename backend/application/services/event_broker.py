@@ -29,16 +29,12 @@ class EventBroker:
             self._subscribers.discard(queue)
 
     async def publish(self, event: VariantUpdatedEvent) -> None:
-        """Hand the event to every subscriber. Never raises for a slow one.
+        """Send the event to every subscriber.
 
-        The queues are bounded, so put_nowait can raise QueueFull. That is
-        handled here, per subscriber, so one browser that stopped reading
-        cannot fail the webhook or the update that is publishing.
-
-        The subscriber is dropped, not just this one event. A browser that
-        quietly missed an event would keep showing the old value and never
-        know. Dropped, its stream ends, the browser reconnects, and it reloads
-        the catalog, which brings back everything it missed.
+        - Never raises for a slow subscriber.
+        - A subscriber with a full queue is dropped, not just skipped.
+        - Its stream ends, the browser reconnects and reloads the catalog,
+          so it never keeps showing a stale value.
         """
         for queue in list(self._subscribers):
             try:

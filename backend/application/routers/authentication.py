@@ -22,8 +22,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
-# The state travels in a cookie on the merchant's own browser, not in a table
-# on the server. See start_installation for why.
+# OAuth state is kept in a browser cookie. See start_installation for why.
 STATE_COOKIE_NAME = "shopify_installation_state"
 STATE_COOKIE_PATH = "/auth"
 STATE_LIFETIME_SECONDS = 600
@@ -33,22 +32,16 @@ STATE_LIFETIME_SECONDS = 600
 async def start_installation(shop: str, settings: SettingsDependency) -> Response:
     """Send the merchant to Shopify to approve the access scopes.
 
-    Called as /auth/install?shop=their-store.myshopify.com, by anyone. The
-    shop domain is checked before anything else touches it, because it becomes
-    the host of a URL this application later posts its client secret to.
+    Called as /auth/install?shop=their-store.myshopify.com.
 
-    Where the state lives. It is a random value set as a cookie on the browser
-    that started the installation, and the callback only proceeds when the
-    state Shopify hands back matches that cookie. A table on the server would
-    prove that this application issued the state, but not that the browser
-    returning with it is the one it was issued to. That second part is what
-    stops somebody from starting an installation themselves and then tricking
-    a merchant into finishing it. The cookie also survives a restart and works
-    across several backend processes, which an in-memory table would not.
-
-    SameSite=Lax rather than Strict: the merchant comes back through a top
-    level redirect from Shopify, which is a cross-site navigation, and a
-    Strict cookie is not sent on those.
+    - The shop domain is validated first: we later send the client secret there.
+    - The state is a random value in a cookie; the callback checks Shopify
+      returns the same value.
+    - A cookie (not a server table) proves the same browser started and
+      finished the install, so nobody can trick a merchant into finishing
+      theirs. It also survives restarts.
+    - SameSite=Lax, not Strict: Strict cookies are not sent on the cross-site
+      redirect back from Shopify.
     """
     shop_domain = shop.strip().lower()
     if not is_valid_shop_domain(shop_domain):
@@ -90,13 +83,12 @@ async def start_installation(shop: str, settings: SettingsDependency) -> Respons
 async def complete_installation(request: Request, settings: SettingsDependency) -> Response:
     """Finish the installation and store the access token.
 
-    Every check comes before the token exchange, and each one that fails ends
-    the request. The order is cheapest first, and the signature leads because
-    until it passes, nothing else in the URL is known to come from Shopify.
+    - All checks run before the token exchange.
+    - The signature goes first: nothing in the URL is trusted until it passes.
     """
     parameters = dict(request.query_params)
 
-    # A repeated parameter would be signed as one value and read as another.
+    # A repeated parameter could be signed with one value and read as another.
     if len(request.query_params.multi_items()) != len(parameters):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "A parameter appears more than once.")
 
@@ -150,12 +142,11 @@ async def complete_installation(request: Request, settings: SettingsDependency) 
 
 
 async def _register_webhook(shop_domain: str, access_token: str, settings: Settings) -> None:
-    """Subscribe to products/update, without letting a failure undo the install.
+    """Subscribe to products/update.
 
-    Shopify refuses an address it cannot reach, and http://localhost is one.
-    The token is already saved and the console works without the webhook; it
-    only stops hearing about edits made elsewhere. So a failure is logged and
-    the merchant carries on.
+    - A failure is logged but does not fail the install.
+    - Shopify rejects addresses it cannot reach, such as http://localhost.
+    - The console still works without the webhook; it just misses outside edits.
     """
     client = ShopifyGraphQLClient(
         store_domain=shop_domain,

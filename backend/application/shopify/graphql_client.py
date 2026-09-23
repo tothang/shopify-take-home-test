@@ -50,8 +50,8 @@ class ShopifyGraphQLClient:
         if response.status_code >= 400:
             raise ShopifyError(f"Shopify returned status {response.status_code}: {response.text}")
 
-        # A 200 is not always JSON: an edge proxy or a maintenance page can
-        # answer instead of Shopify. parse_float keeps any number out of a float.
+        # - A 200 may not be JSON (e.g. a proxy error page).
+        # - parse_float=Decimal keeps numbers out of floats.
         try:
             payload = json.loads(response.content, parse_float=Decimal)
         except ValueError as error:

@@ -1,12 +1,8 @@
 """Turning the REST shaped products/update payload into application models.
 
-Shopify sends webhooks in the REST shape even when the rest of the
-integration speaks GraphQL, so this is the one place that understands lower
-case policy values and identifiers that arrive as numbers.
-
-It is a plain function rather than part of the route on purpose: the mapping
-is the part most likely to be wrong, and this way it can be tested without
-signing a request first.
+- Webhooks use the REST shape (numeric IDs, lowercase policies), unlike the
+  rest of the integration, which uses GraphQL.
+- Kept separate from the route so it can be tested without signing requests.
 """
 
 import logging
@@ -18,23 +14,18 @@ from application.schemas import InventoryPolicy, ProductVariant
 
 logger = logging.getLogger(__name__)
 
-# The REST webhook payload carries no currency. A shop has exactly one, and
-# Shopify assumes the receiver already knows it. An application serving
-# several shops would read it once from the shop record and cache it per shop;
-# here there is one shop and the seed catalog is in dollars.
+# The webhook payload has no currency.
+# - Several shops: cache each shop's currency.
+# - Here: one shop, priced in dollars.
 DEFAULT_CURRENCY_CODE = "USD"
 
 
 def variants_from_webhook_payload(payload: Any) -> list[ProductVariant]:
     """Map every variant in a products/update payload.
 
-    A variant that cannot be mapped is logged and left out rather than
-    failing the whole webhook. Shopify retries a webhook it considers failed,
-    and a payload we cannot read will not read any better the second time.
-
-    A payload that is not shaped like one at all raises TypeError. This
-    function raises nothing but ValueError, KeyError and TypeError, which is
-    what the route catches.
+    - A variant that cannot be mapped is logged and skipped.
+    - A payload with the wrong shape raises TypeError.
+    - Only raises ValueError, KeyError and TypeError, which the route catches.
     """
     if not isinstance(payload, dict):
         raise TypeError(f"A products/update payload is a JSON object, not {type(payload).__name__}.")
@@ -88,27 +79,26 @@ def _variant_from_entry(
 
 
 def _as_identifier(value: Any) -> str:
-    """Webhook identifiers arrive as numbers; this API carries them as strings."""
+    """Webhook IDs are numbers; the application uses strings."""
     return "" if value is None else str(value)
 
 
 def _as_money(value: Any) -> Decimal:
-    """Take the price as text, so it never passes through a float on the way in."""
+    """Parse via str so the price never becomes a float."""
     return Decimal(str(value))
 
 
 def _as_inventory_policy(value: Any) -> InventoryPolicy:
-    """ "continue" over the wire is InventoryPolicy.CONTINUE here.
+    """Map "continue" to InventoryPolicy.CONTINUE.
 
-    An unknown value raises, which drops the variant. Guessing DENY would put
-    "stop at zero" on the screen for a variant that keeps selling, and being
-    wrong about that is worse than saying nothing.
+    - An unknown value raises, and the variant is skipped.
+    - Guessing DENY could show "stop at zero" for a variant that keeps selling.
     """
     return InventoryPolicy(str(value).upper())
 
 
 def _as_timestamp(value: Any) -> datetime:
-    """Shopify sends an offset, as in 2026-01-15T09:30:00-05:00."""
+    """Parse e.g. 2026-01-15T09:30:00-05:00. Assume UTC if no offset."""
     if not value:
         return datetime.now(tz=UTC)
     parsed = datetime.fromisoformat(str(value))

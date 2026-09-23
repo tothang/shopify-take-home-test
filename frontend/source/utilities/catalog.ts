@@ -1,16 +1,12 @@
 import type { Product, ProductVariant, VariantChange } from "../types";
 
 /**
- * The rules that decide what the table shows. Kept free of React so they can
- * be tested on their own.
+ * Rules for what the table shows, kept free of React for testing.
  *
- * What wins: the newest state the server has stored, by updated_at. Every
- * copy of a variant that reaches the browser passes through isAtLeastAsNew:
- * the response to a save, the echo of that save on the event stream, a
- * webhook for somebody else's edit, a full reload after a reconnect. The
- * server is the only clock anybody shares, so ordering by its timestamps is
- * the one rule that gives every open tab the same answer, whatever order the
- * messages happened to arrive in.
+ * - The newest server state wins, by updated_at.
+ * - Every variant update (save response, stream event, reload) goes through
+ *   this check.
+ * - So all tabs agree, whatever order updates arrive in.
  */
 export function isAtLeastAsNew(incoming: ProductVariant, current: ProductVariant): boolean {
   const incomingTime = Date.parse(incoming.updated_at);
@@ -18,8 +14,7 @@ export function isAtLeastAsNew(incoming: ProductVariant, current: ProductVariant
   if (Number.isNaN(incomingTime) || Number.isNaN(currentTime)) {
     return true;
   }
-  // A tie is accepted: it is the same stored state arriving twice, typically
-  // the save response and its own echo on the stream.
+  // Accept ties: usually the save response and its echo on the stream.
   return incomingTime >= currentTime;
 }
 
@@ -44,10 +39,7 @@ export function mergeVariant(products: Product[], incoming: ProductVariant): Pro
   return anyChanged ? next : products;
 }
 
-/**
- * Take a freshly loaded catalog, keeping any variant the table already holds
- * a newer copy of. A reload can be slower than an event that overtook it.
- */
+/** Use a freshly loaded catalog, but keep variants we already have newer copies of. */
 export function mergeCatalog(current: Product[], loaded: Product[]): Product[] {
   const held = new Map<string, ProductVariant>();
   for (const product of current) {
@@ -65,10 +57,10 @@ export function mergeCatalog(current: Product[], loaded: Product[]): Product[] {
 }
 
 /**
- * Lay edits that are still being saved over what the server has confirmed.
+ * Apply in-flight edits on top of the confirmed catalog.
  *
- * Only the fields being changed are laid over. A change somebody else makes
- * to the other field of the same variant still shows while the save runs.
+ * - Only the edited fields are overridden.
+ * - Other fields can still update during a save.
  */
 export function withPendingChanges(
   products: Product[],

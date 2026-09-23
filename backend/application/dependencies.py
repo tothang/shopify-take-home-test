@@ -48,8 +48,7 @@ def get_product_gateway() -> ProductGateway:
             timeout_seconds=settings.request_timeout_seconds,
         )
         _graphql_clients[key] = client
-    # One gateway per client rather than per request, so the shop currency it
-    # learns on the first read is not fetched again for every update.
+    # Reuse the gateway so its cached shop currency survives between requests.
     gateway = _admin_api_gateways.get(key)
     if gateway is None:
         gateway = AdminApiProductGateway(client)

@@ -4,24 +4,21 @@ import { PRODUCT_EVENT_STREAM_PATH } from "../api/backendClient";
 import type { ProductVariant, VariantUpdatedEvent } from "../types";
 
 /**
- * open: events are arriving. connecting: not yet, or the browser is retrying
- * a dropped connection by itself. closed: the browser gave up, and this hook
- * is waiting to try again. Only open means the table is following the store.
+ * - open: receiving events
+ * - connecting: connecting, or the browser is retrying on its own
+ * - closed: the browser gave up; this hook will retry later
  */
 export type StreamStatus = "connecting" | "open" | "closed";
 
-// Used after the browser gives up on its own, which it does when the server
-// answers with an error rather than dropping the connection.
+// Our own retry delays, used once the browser stops retrying (e.g. on an HTTP error).
 const RETRY_DELAYS_MILLISECONDS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 /**
- * Keep the table in step with changes made outside this browser tab.
+ * Keep the table in sync with changes made outside this tab.
  *
- * onConnected runs on every "ready", the first included. Events sent while
- * the connection was down are gone, and the stream cannot replay them, so the
- * only way to be sure the table is current after a gap is to load it again.
- * That costs one extra request on page load, which is cheaper than showing a
- * price that is no longer the price.
+ * - onConnected runs on every "ready", including the first.
+ * - The stream cannot replay missed events, so the caller reloads the
+ *   catalog on each connect.
  */
 export function useProductStream(
   onVariantUpdated: (variant: ProductVariant) => void,
@@ -29,8 +26,7 @@ export function useProductStream(
 ): StreamStatus {
   const [status, setStatus] = useState<StreamStatus>("connecting");
 
-  // The connection is opened once, and reads the latest callbacks through a
-  // ref, so a new callback does not tear it down and open another.
+  // Read callbacks through a ref so a new callback does not reopen the connection.
   const handlers = useRef({ onVariantUpdated, onConnected });
   useEffect(() => {
     handlers.current = { onVariantUpdated, onConnected };
@@ -80,8 +76,7 @@ export function useProductStream(
 
     connect();
 
-    // Closing matters: StrictMode mounts twice in development, and without
-    // this every event would arrive twice over two open connections.
+    // Close on unmount, or StrictMode's double mount would open two connections.
     return () => {
       disposed = true;
       clearTimeout(retryTimer);

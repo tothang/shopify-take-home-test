@@ -11,7 +11,7 @@ export interface Notice {
 }
 
 export interface Catalog {
-  /** What the table shows: confirmed state with edits in flight laid over it. */
+  /** Confirmed state with in-flight edits applied on top. */
   products: Product[];
   savingVariantIds: ReadonlySet<string>;
   isLoading: boolean;
@@ -19,9 +19,9 @@ export interface Catalog {
   notices: Notice[];
   dismissNotice: (id: number) => void;
   saveChange: (variant: ProductVariant, change: VariantChange) => Promise<void>;
-  /** For the event stream: a variant the server has stored. */
+  /** Apply a variant pushed by the event stream. */
   applyServerVariant: (variant: ProductVariant) => void;
-  /** Reload everything, keeping whatever is newer than the reload. */
+  /** Reload the catalog, keeping any variant newer than the reload. */
   reload: () => Promise<void>;
 }
 
@@ -43,15 +43,13 @@ function describeChange(variant: ProductVariant, change: VariantChange): string 
 }
 
 /**
- * The catalog as the operator should see it.
+ * The catalog as the operator sees it, in two layers:
+ * - confirmed: what the server has stored (only moves forward in time)
+ * - pending: edits still being saved, shown on top
  *
- * Two layers. products holds what the server has confirmed, and only ever
- * moves forward in time. pending holds edits that are still being saved and
- * is laid over it for display. Keeping them apart is what makes rollback and
- * conflicts simple: an event updates the confirmed layer even while an edit is
- * in flight, but cannot change what is on screen until that edit is settled.
- * Once it is, the pending layer goes and the newest confirmed state shows,
- * whether it came from the save or from somebody else.
+ * - Events keep updating the confirmed layer during a save.
+ * - When the save ends, the pending edit is removed and the newest confirmed
+ *   value shows. This makes rollback simple.
  */
 export function useCatalog(): Catalog {
   const [confirmed, setConfirmed] = useState<Product[]>([]);
@@ -104,7 +102,7 @@ export function useCatalog(): Catalog {
       setLoadError(null);
       setIsLoading(false);
     } catch (error: unknown) {
-      // The table keeps what it has. It may be behind, and the notice says so.
+      // Keep the current (possibly stale) table and warn the operator.
       addNotice(null, `The catalog could not be refreshed: ${describe(error)} Values may be out of date.`);
     }
   }, [addNotice]);
@@ -122,9 +120,7 @@ export function useCatalog(): Catalog {
           `Could not save ${describeChange(variant, change)}: ${describe(error)} The row shows the last saved value.`,
         );
       } finally {
-        // Success or failure, the edit is settled. Dropping it reveals the
-        // newest confirmed state: the stored value, or on failure whatever the
-        // server last said, including anything that arrived in the meantime.
+        // Either way, drop the pending edit to reveal the latest confirmed value.
         setPending((current) => {
           const next = new Map(current);
           next.delete(variant.id);

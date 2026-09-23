@@ -15,15 +15,15 @@ from application.shopify.identifiers import to_global_identifier, to_numeric_ide
 
 logger = logging.getLogger(__name__)
 
-# The userErrors codes that mean the thing the caller named is not there. Any
-# other code means Shopify understood the request and refused it.
+# userErrors codes that mean "not found".
+# - Any other code means Shopify rejected the change.
 _NOT_FOUND_CODES = frozenset(
     {"PRODUCT_DOES_NOT_EXIST", "PRODUCT_VARIANT_DOES_NOT_EXIST", "MUST_BE_FOR_THIS_PRODUCT"}
 )
 
 
 class GraphQLTransport(Protocol):
-    """What the gateway needs from ShopifyGraphQLClient, and all a test must fake."""
+    """The part of ShopifyGraphQLClient the gateway uses (and tests fake)."""
 
     async def execute(self, document: str, variables: dict[str, Any] | None = None) -> dict[str, Any]: ...
 
@@ -31,16 +31,15 @@ class GraphQLTransport(Protocol):
 class AdminApiProductGateway:
     """Reads and writes the catalog of a real Shopify store.
 
-    This is the boundary. Global identifiers, the Money scalar and the
-    GraphQL response shape stop here; what leaves is the application models,
-    with numeric identifiers and decimal prices.
+    - In: GraphQL shapes, global IDs, Money strings.
+    - Out: application models with numeric IDs and Decimal prices.
     """
 
     def __init__(self, client: GraphQLTransport) -> None:
         self._client = client
-        # A variant's price is in the shop currency, and a mutation cannot ask
-        # the shop for it. Kept after the first read; a shop changes its
-        # currency rarely, and never in the middle of a sale.
+        # Shop currency:
+        # - cached after the first read
+        # - the mutation response does not include it
         self._currency_code: str | None = None
 
     async def list_products(self, limit: int = 25) -> list[Product]:
@@ -75,15 +74,14 @@ class AdminApiProductGateway:
         price: Decimal | None = None,
         inventory_policy: InventoryPolicy | None = None,
     ) -> ProductVariant:
-        # Anything but digits cannot name a Shopify record. Sent as it is, it
-        # would come back as a GraphQL error, which reads as the store failing
-        # rather than as the caller asking for something that is not there.
+        # - Non-numeric IDs cannot exist in Shopify.
+        # - Return 404 now, instead of a GraphQL error that becomes a 502.
         if not (product_id.isdigit() and variant_id.isdigit()):
             raise VariantNotFoundError(f"Variant {variant_id} does not exist on product {product_id}.")
 
         variant_input: dict[str, Any] = {"id": to_global_identifier("ProductVariant", variant_id)}
         if price is not None:
-            # Money travels as text. str of a Decimal is exact; a float is not.
+            # Send money as a string to stay exact.
             variant_input["price"] = str(price)
         if inventory_policy is not None:
             variant_input["inventoryPolicy"] = inventory_policy.value
@@ -94,7 +92,7 @@ class AdminApiProductGateway:
         )
         result = _required(data, "productVariantsBulkUpdate")
 
-        # A 200 with userErrors is a failure. The transport has no way to know.
+        # userErrors arrive with a 200, so check them here.
         user_errors = result.get("userErrors") or []
         if any(error.get("code") in _NOT_FOUND_CODES for error in user_errors):
             raise VariantNotFoundError(f"Variant {variant_id} does not exist on product {product_id}.")
@@ -112,19 +110,17 @@ class AdminApiProductGateway:
         raise ShopifyError("Shopify accepted the change but did not return the variant.")
 
     def _to_variant(self, node: dict[str, Any]) -> ProductVariant:
-        """Map one variant node. A node we cannot read is the store failing, not a crash."""
+        """Map one variant node. Raise ShopifyError if it is malformed."""
         try:
             return ProductVariant(
                 id=to_numeric_identifier(node["id"]),
                 product_id=to_numeric_identifier(node["product"]["id"]),
                 title=node["title"],
                 sku=node.get("sku") or None,
-                # The client parses numbers as Decimal and Money arrives as text,
-                # so neither path goes through a float. str() covers both.
+                # Price is a string or a Decimal, never a float.
                 price=Decimal(str(node["price"])),
                 currency_code=self._currency_code or "",
-                # Null when the shop does not track stock for this variant. Zero
-                # is the honest reading of "nothing we know of to sell".
+                # Null when stock is not tracked; show 0.
                 inventory_quantity=node.get("inventoryQuantity") or 0,
                 inventory_policy=InventoryPolicy(node["inventoryPolicy"]),
                 updated_at=datetime.fromisoformat(node["updatedAt"]),
@@ -134,7 +130,7 @@ class AdminApiProductGateway:
 
 
 def _required(data: dict[str, Any], *path: str) -> Any:
-    """Walk into a response, and fail as ShopifyError rather than KeyError."""
+    """Read a nested key, raising ShopifyError instead of KeyError."""
     current: Any = data
     for key in path:
         if not isinstance(current, dict) or current.get(key) is None:

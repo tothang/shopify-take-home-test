@@ -8,10 +8,8 @@ PRODUCTS_UPDATE_TOPIC = "PRODUCTS_UPDATE"
 async def register_products_update_webhook(client: ShopifyGraphQLClient, uri: str) -> str:
     """Ask Shopify to send products/update to uri, and return the subscription id.
 
-    Shopify checks the address before it accepts it, so an address it cannot
-    reach, http://localhost for one, comes back as a user error. That arrives
-    with a 200 status, so it is turned into ShopifyError here: a mutation with
-    userErrors has failed, whatever the transport said.
+    - Raises ShopifyError on userErrors, which arrive with a 200.
+    - Example: Shopify cannot reach the address, such as http://localhost.
     """
     data = await client.execute(
         WEBHOOK_SUBSCRIPTION_CREATE_MUTATION,

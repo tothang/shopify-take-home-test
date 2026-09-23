@@ -1,10 +1,7 @@
 """Changing a variant, and telling every connected browser about it.
 
-Two paths end with the same obligation. The update endpoint changes a variant
-itself, and the webhook hears that somebody else changed one. Both have to
-reach every open tab, or an operator ends up looking at a price that is no
-longer the price. Keeping that obligation in one place means the next caller
-cannot forget it.
+- Both the update endpoint and the webhook must broadcast to every open tab.
+- Keeping that in one place means no caller can forget it.
 """
 
 from decimal import Decimal
@@ -13,9 +10,9 @@ from application.schemas import InventoryPolicy, ProductVariant, VariantUpdatedE
 from application.services.event_broker import event_broker
 from application.shopify.gateway import ProductGateway
 
-# Where a change came from, for the log and for anyone reading the stream. The
-# browser does not need it: it orders every change by updated_at, its own
-# included, so one rule covers an echo of its own edit and somebody else's.
+# Where a change came from.
+# - Informational only (log and stream readers).
+# - The browser orders changes by updated_at, whatever the source.
 SOURCE_API = "api"
 SOURCE_WEBHOOK = "webhook"
 
@@ -29,9 +26,8 @@ async def apply_variant_change(
 ) -> ProductVariant:
     """Apply a change through the gateway and broadcast what was stored.
 
-    Raises VariantNotFoundError when the variant does not exist, and
-    VariantUpdateRejectedError when the catalog refuses the change. Callers
-    turn those into status codes; this function does not know about HTTP.
+    - Raises VariantNotFoundError or VariantUpdateRejectedError.
+    - Callers map them to HTTP status codes.
     """
     variant = await gateway.update_variant(
         product_id=product_id,

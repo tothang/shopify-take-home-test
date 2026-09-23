@@ -21,15 +21,11 @@ SHOP_DOMAIN_HEADER = "X-Shopify-Shop-Domain"
 async def handle_product_update(request: Request, settings: SettingsDependency) -> Response:
     """Accept the products/update webhook and feed the event stream.
 
-    Shopify waits about five seconds and retries anything slower or failed, so
-    this does the least it can: verify, map, publish. Publishing is a
-    put_nowait onto the queue of each connected browser and never blocks. The
-    moment this path grows something slow, a database write or a call back to
-    Shopify, it belongs behind a queue instead.
-
-    Anything other than a bad signature answers 204. A retry cannot improve a
-    payload we could not read, and a webhook Shopify keeps redelivering is
-    worse than one dropped loudly into the log.
+    - Shopify retries anything slower than about five seconds, so this only
+      verifies, maps and publishes (publishing never blocks).
+    - Anything slow should move behind a queue.
+    - Only a bad signature is rejected (401).
+    - Everything else gets 204: a retry would not fix an unreadable payload.
     """
     raw_body = await request.body()
     shop_domain = request.headers.get(SHOP_DOMAIN_HEADER, "")
@@ -39,8 +35,7 @@ async def handle_product_update(request: Request, settings: SettingsDependency) 
         raw_body,
         request.headers.get(SIGNATURE_HEADER),
     ):
-        # The shop domain is only a header, and this request has just failed to
-        # prove it came from Shopify. It is logged as a claim, not as a fact.
+        # Unverified request, so the shop domain header is only a claim.
         logger.warning(
             "Rejected a webhook whose signature did not verify.",
             extra={"claimed_shop_domain": shop_domain, "body_bytes": len(raw_body)},
@@ -51,14 +46,12 @@ async def handle_product_update(request: Request, settings: SettingsDependency) 
         )
 
     try:
-        # parse_float keeps a price that arrives as a JSON number out of a
-        # float. Shopify sends money as a string, but this costs nothing.
+        # parse_float=Decimal so a numeric price never becomes a float.
         payload = json.loads(raw_body, parse_float=Decimal)
         variants = variants_from_webhook_payload(payload)
     except (ValueError, KeyError, TypeError):
-        # The signature verified, so Shopify sent exactly these bytes. A retry
-        # would send them again and fail the same way, so the request is
-        # accepted and the failure is left in the log, where someone can act on it.
+        # - A retry would send the same bytes and fail again.
+        # - So accept it and log the failure.
         logger.exception(
             "A signed webhook could not be read.",
             extra={"shop_domain": shop_domain, "body_bytes": len(raw_body)},

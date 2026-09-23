@@ -17,15 +17,13 @@ export function VariantRow({
   onInventoryPolicyChange,
 }: VariantRowProperties) {
   const [priceDraft, setPriceDraft] = useState(variant.price);
-  // The price when the operator started typing, or null when they are not.
+  // Price when the operator started editing, or null when not editing.
   const [priceWhenEditingStarted, setPriceWhenEditingStarted] = useState<string | null>(null);
   const isEditing = priceWhenEditingStarted !== null;
 
-  // Follow the stored price, but not over what the operator is typing: an
-  // event arriving mid-edit would otherwise wipe their input without a word.
-  // Done during render rather than in an effect, so the input changes in the
-  // same paint as everything else. An effect runs after the paint, and would
-  // show a rollback message beside a value that has not rolled back yet.
+  // Sync the input with the stored price:
+  // - skipped while the operator is typing
+  // - done during render (not in an effect) so it updates in the same paint
   const [followedPrice, setFollowedPrice] = useState(variant.price);
   if (variant.price !== followedPrice && !isEditing) {
     setFollowedPrice(variant.price);
