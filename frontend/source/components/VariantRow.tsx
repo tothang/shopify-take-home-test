@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { InventoryPolicy, ProductVariant } from "../types";
 import { isValidPriceInput, normalizePriceInput } from "../utilities/money";
@@ -17,10 +17,20 @@ export function VariantRow({
   onInventoryPolicyChange,
 }: VariantRowProperties) {
   const [priceDraft, setPriceDraft] = useState(variant.price);
+  // Price when the operator started editing, or null when not editing.
+  const [priceWhenEditingStarted, setPriceWhenEditingStarted] = useState<string | null>(null);
+  const isEditing = priceWhenEditingStarted !== null;
 
-  useEffect(() => {
+  // Sync the input with the stored price:
+  // - skipped while the operator is typing
+  // - done during render (not in an effect) so it updates in the same paint
+  const [followedPrice, setFollowedPrice] = useState(variant.price);
+  if (variant.price !== followedPrice && !isEditing) {
+    setFollowedPrice(variant.price);
     setPriceDraft(variant.price);
-  }, [variant.price]);
+  }
+
+  const changedWhileEditing = isEditing && variant.price !== priceWhenEditingStarted;
 
   const hasValidPrice = isValidPriceInput(priceDraft);
   const hasPendingChange = normalizePriceInput(priceDraft) !== variant.price;
@@ -48,19 +58,29 @@ export function VariantRow({
             value={priceDraft}
             disabled={isSaving}
             onChange={(event) => setPriceDraft(event.target.value)}
-            onBlur={commitPrice}
+            onFocus={() => setPriceWhenEditingStarted(variant.price)}
+            onBlur={() => {
+              setPriceWhenEditingStarted(null);
+              commitPrice();
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.currentTarget.blur();
               }
               if (event.key === "Escape") {
                 setPriceDraft(variant.price);
+                setPriceWhenEditingStarted(variant.price);
               }
             }}
           />
           <span className="currency-code">{variant.currency_code}</span>
         </div>
         {!hasValidPrice ? <span className="field-error">Enter an amount above zero</span> : null}
+        {changedWhileEditing ? (
+          <span className="field-note">
+            Changed elsewhere to {variant.price}. Saving will replace it; Escape takes theirs.
+          </span>
+        ) : null}
       </td>
       <td>
         <label className="policy-toggle">

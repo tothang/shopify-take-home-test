@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     shopify_application_url: str = "http://localhost:8000"
     shopify_scopes: str = "read_products,write_products,read_inventory"
 
+    # Where the merchant lands once installation finishes.
+    frontend_url: str = "http://localhost:5173"
+
     use_mock_shopify: bool = True
     allowed_origins: str = "http://localhost:5173"
     request_timeout_seconds: float = 10.0
@@ -35,6 +38,10 @@ class Settings(BaseSettings):
     @property
     def installation_redirect_url(self) -> str:
         return f"{self.shopify_application_url.rstrip('/')}/auth/callback"
+
+    @property
+    def products_update_webhook_url(self) -> str:
+        return f"{self.shopify_application_url.rstrip('/')}/webhooks/shopify/products-update"
 
 
 @lru_cache

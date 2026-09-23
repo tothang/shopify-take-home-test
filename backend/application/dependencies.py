@@ -11,6 +11,7 @@ from application.shopify.in_memory_gateway import InMemoryProductGateway
 
 _in_memory_gateway = InMemoryProductGateway()
 _graphql_clients: dict[tuple[str, str], ShopifyGraphQLClient] = {}
+_admin_api_gateways: dict[tuple[str, str], AdminApiProductGateway] = {}
 
 
 def get_product_gateway() -> ProductGateway:
@@ -37,7 +38,8 @@ def get_product_gateway() -> ProductGateway:
             ),
         )
 
-    client = _graphql_clients.get((shop_domain, access_token))
+    key = (shop_domain, access_token)
+    client = _graphql_clients.get(key)
     if client is None:
         client = ShopifyGraphQLClient(
             store_domain=shop_domain,
@@ -45,14 +47,20 @@ def get_product_gateway() -> ProductGateway:
             api_version=settings.shopify_api_version,
             timeout_seconds=settings.request_timeout_seconds,
         )
-        _graphql_clients[(shop_domain, access_token)] = client
-    return AdminApiProductGateway(client)
+        _graphql_clients[key] = client
+    # Reuse the gateway so its cached shop currency survives between requests.
+    gateway = _admin_api_gateways.get(key)
+    if gateway is None:
+        gateway = AdminApiProductGateway(client)
+        _admin_api_gateways[key] = gateway
+    return gateway
 
 
 async def close_graphql_clients() -> None:
     for client in _graphql_clients.values():
         await client.aclose()
     _graphql_clients.clear()
+    _admin_api_gateways.clear()
 
 
 ProductGatewayDependency = Annotated[ProductGateway, Depends(get_product_gateway)]

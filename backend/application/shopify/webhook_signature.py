@@ -1,12 +1,30 @@
+import base64
+import hashlib
+import hmac
+
+
 def verify_webhook_signature(secret: str, request_body: bytes, header_value: str | None) -> bool:
     """Return True when the request really came from Shopify.
 
-    Task 3: implement this. Shopify signs the raw request body with the
-    application secret and sends the result in the X-Shopify-Hmac-Sha256
-    header. Use the raw bytes of the body, not a parsed and re-serialized
-    copy of it, and compare the two values in constant time.
-
-    The provided tests in tests/test_webhook_signature.py define the expected
-    behavior, including what happens when the header is missing or malformed.
+    - Shopify signs the raw body with the app secret.
+    - The digest is base64 in X-Shopify-Hmac-Sha256.
+    - Use the raw bytes: re-serialized JSON will not match.
+    - A malformed header returns False rather than raising.
     """
-    raise NotImplementedError("Task 3: verify the Shopify webhook signature.")
+    # Anyone can compute an HMAC with an empty key, so reject everything.
+    if not secret:
+        return False
+
+    if not header_value:
+        return False
+
+    try:
+        provided_digest = base64.b64decode(header_value, validate=True)
+    except ValueError:
+        # Not valid base64 (binascii.Error is a ValueError).
+        return False
+
+    expected_digest = hmac.new(secret.encode("utf-8"), request_body, hashlib.sha256).digest()
+
+    # Constant-time comparison to avoid timing attacks.
+    return hmac.compare_digest(expected_digest, provided_digest)

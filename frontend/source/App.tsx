@@ -1,86 +1,65 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 
-import { fetchProducts } from "./api/backendClient";
 import { ProductTable } from "./components/ProductTable";
-import { useProductStream } from "./hooks/useProductStream";
-import type { InventoryPolicy, Product, ProductVariant } from "./types";
+import { useCatalog } from "./hooks/useCatalog";
+import { type StreamStatus, useProductStream } from "./hooks/useProductStream";
+import type { InventoryPolicy, ProductVariant } from "./types";
+
+const STREAM_STATUS_TEXT: Record<StreamStatus, string> = {
+  open: "Live updates: on",
+  connecting: "Live updates: connecting",
+  closed: "Live updates: off, retrying. Changes made elsewhere will not appear until this reconnects.",
+};
 
 export function App() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [savingVariantIds] = useState<ReadonlySet<string>>(new Set());
+  const catalog = useCatalog();
+  const streamStatus = useProductStream(catalog.applyServerVariant, catalog.reload);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchProducts(controller.signal)
-      .then((loaded) => {
-        setProducts(loaded);
-        setLoadError(null);
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-        setLoadError(error instanceof Error ? error.message : "The catalog could not be loaded.");
-      })
-      .finally(() => setIsLoading(false));
-    return () => controller.abort();
-  }, []);
+  const { saveChange } = catalog;
 
-  const applyVariant = useCallback((updated: ProductVariant) => {
-    setProducts((current) =>
-      current.map((product) =>
-        product.id !== updated.product_id
-          ? product
-          : {
-              ...product,
-              variants: product.variants.map((variant) =>
-                variant.id === updated.id ? updated : variant,
-              ),
-            },
-      ),
-    );
-  }, []);
-
-  const streamStatus = useProductStream(applyVariant);
-
-  /**
-   * Task 6: send the change to the backend and keep the table honest.
-   *
-   * Show the new value straight away, roll it back when the request fails,
-   * tell the operator what went wrong, and make sure a later event from the
-   * stream does not resurrect a value the operator has already replaced.
-   */
-  const handlePriceCommit = useCallback((variant: ProductVariant, price: string) => {
-    void variant;
-    void price;
-  }, []);
+  const handlePriceCommit = useCallback(
+    (variant: ProductVariant, price: string) => {
+      void saveChange(variant, { price });
+    },
+    [saveChange],
+  );
 
   const handleInventoryPolicyChange = useCallback(
     (variant: ProductVariant, policy: InventoryPolicy) => {
-      void variant;
-      void policy;
+      void saveChange(variant, { inventory_policy: policy });
     },
-    [],
+    [saveChange],
   );
 
   return (
     <main className="page">
       <header className="page-header">
         <h1>Pricing console</h1>
-        <p className="stream-status" data-status={streamStatus}>
-          Live updates: {streamStatus}
+        <p className="stream-status" data-status={streamStatus} role="status">
+          {STREAM_STATUS_TEXT[streamStatus]}
         </p>
       </header>
 
-      {loadError ? <p className="error-banner">{loadError}</p> : null}
-      {isLoading ? <p className="loading-state">Loading the catalog</p> : null}
+      {catalog.notices.length > 0 ? (
+        <div className="notice-list">
+          {catalog.notices.map((notice) => (
+            <div key={notice.id} className="error-banner notice" role="alert">
+              <span>{notice.message}</span>
+              <button type="button" className="notice-dismiss" onClick={() => catalog.dismissNotice(notice.id)}>
+                Dismiss
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
-      {!isLoading && !loadError ? (
+      {catalog.loadError ? <p className="error-banner">{catalog.loadError}</p> : null}
+      {catalog.isLoading ? <p className="loading-state">Loading the catalog</p> : null}
+
+      {!catalog.isLoading && !catalog.loadError ? (
         <ProductTable
-          products={products}
-          savingVariantIds={savingVariantIds}
+          products={catalog.products}
+          savingVariantIds={catalog.savingVariantIds}
           onPriceCommit={handlePriceCommit}
           onInventoryPolicyChange={handleInventoryPolicyChange}
         />
